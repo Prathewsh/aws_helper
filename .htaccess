@@ -1,0 +1,12 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Prevent direct access to .env, dotfiles, and backend source folders
+    RewriteRule ^\.(env|git) - [F,L,NC]
+    RewriteRule ^(app|tests|writable|vendor)/ - [F,L,NC]
+
+    # Forward all requests to public/ directory
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+

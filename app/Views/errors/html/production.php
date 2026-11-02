@@ -1,0 +1,1 @@
+<?= view('permission_denied') ?>
