@@ -8,6 +8,7 @@ use Aws\Exception\MultipartUploadException;
 use Aws\S3\Exception\S3MultipartUploadException;
 use Aws\S3\ObjectUploader;
 use Aws\S3\S3Client;
+use CodeIgniter\HTTP\Files\UploadedFile;
 use Config\Upload as UploadConfig;
 use Throwable;
 
@@ -20,7 +21,7 @@ class UploadController extends BaseController
     {
         // Check for content-length exceeding PHP's post_max_size
         $contentLength = (int) ($this->request->getServer('CONTENT_LENGTH') ?? 0);
-        if ($contentLength > 0 && empty($_POST) && empty($_FILES)) {
+        if ($contentLength > 0 && $this->exceedsPostMaxSize($contentLength)) {
             return $this->response
                 ->setStatusCode(422)
                 ->setContentType('application/json')
@@ -32,46 +33,61 @@ class UploadController extends BaseController
 
         // Determine max allowed upload size in MB
         $uploadConfig = config(UploadConfig::class);
-        $maxSizeMb = (int) (env('MAX_UPLOAD_MB') ?: ($uploadConfig->maxUploadSizeMb ?? 500));
+        $maxSizeMb = filter_var(env('MAX_UPLOAD_MB', $uploadConfig->maxUploadSizeMb), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: $uploadConfig->maxUploadSizeMb;
         $maxSizeBytes = $maxSizeMb * 1024 * 1024;
 
         // Validation rules for scalar parameters
         $rules = [
             'bucket'     => [
                 'label' => 'bucket',
-                'rules' => 'required|string|trim',
+                'rules' => 'required|string',
             ],
             'region'     => [
                 'label' => 'region',
-                'rules' => 'required|string|trim',
+                'rules' => 'required|string',
             ],
             'access_key' => [
                 'label' => 'access_key',
-                'rules' => 'required|string|trim',
+                'rules' => 'required|string',
             ],
             'secret_key' => [
                 'label' => 'secret_key',
-                'rules' => 'required|string|trim',
+                'rules' => 'required|string',
             ],
             'path'       => [
                 'label' => 'path',
-                'rules' => 'permit_empty|string|trim',
+                'rules' => 'permit_empty|string',
             ],
             'acl'        => [
                 'label' => 'acl',
-                'rules' => 'permit_empty|in_list[private,public-read]',
+                'rules' => 'permit_empty|string|in_list[private,public-read]',
             ],
         ];
 
+        $data = $this->request->getPost();
+        foreach (['bucket', 'region', 'access_key', 'path', 'acl'] as $field) {
+            if (isset($data[$field]) && is_string($data[$field])) {
+                $data[$field] = trim($data[$field]);
+            }
+        }
+
         $errors = [];
-        if (! $this->validate($rules)) {
+        if (! $this->validateData($data, $rules)) {
             $errors = $this->validator->getErrors();
         }
 
+        foreach (array_keys($rules) as $field) {
+            if (isset($data[$field]) && ! is_string($data[$field])) {
+                $errors[$field] = "The {$field} field must be a string.";
+            }
+        }
+
         // Validate the uploaded file
-        $file = $this->request->getFile('file');
-        if ($file === null || ! $file->isValid()) {
-            $errors['file'] = $file !== null ? $file->getErrorString() : 'The file field is required.';
+        $file = $this->request->getFiles()['file'] ?? null;
+        if (! $file instanceof UploadedFile) {
+            $errors['file'] = 'A single file is required.';
+        } elseif (! $file->isValid()) {
+            $errors['file'] = $file->getErrorString();
         } elseif ($file->getSize() > $maxSizeBytes) {
             $errors['file'] = "The file size exceeds the allowed limit of {$maxSizeMb} MB.";
         }
@@ -87,12 +103,12 @@ class UploadController extends BaseController
                 ]);
         }
 
-        $bucket    = (string) $this->request->getPost('bucket');
-        $region    = (string) $this->request->getPost('region');
-        $accessKey = (string) $this->request->getPost('access_key');
-        $secretKey = (string) $this->request->getPost('secret_key');
-        $path      = $this->request->getPost('path');
-        $acl       = $this->request->getPost('acl');
+        $bucket    = (string) $data['bucket'];
+        $region    = (string) $data['region'];
+        $accessKey = (string) $data['access_key'];
+        $secretKey = (string) $data['secret_key'];
+        $path      = $data['path'] ?? null;
+        $acl       = $data['acl'] ?? null;
 
         $aclValue = ($acl !== null && trim((string) $acl) !== '') ? trim((string) $acl) : null;
 
@@ -160,7 +176,7 @@ class UploadController extends BaseController
             // Execute upload
             $uploader->upload();
 
-            $url = sprintf('https://%s.s3.%s.amazonaws.com/%s', $bucket, $region, $s3Key);
+            $url = $s3Client->getObjectUrl($bucket, $s3Key);
 
             return $this->response
                 ->setStatusCode(200)
@@ -212,6 +228,21 @@ class UploadController extends BaseController
                 fclose($fileStream);
             }
         }
+    }
+
+    private function exceedsPostMaxSize(int $contentLength): bool
+    {
+        $limit = trim((string) ini_get('post_max_size'));
+        $bytes = (int) $limit;
+        $unit = strtolower(substr($limit, -1));
+        $bytes *= match ($unit) {
+            'g' => 1024 ** 3,
+            'm' => 1024 ** 2,
+            'k' => 1024,
+            default => 1,
+        };
+
+        return $bytes > 0 && $contentLength > $bytes;
     }
 
     /**

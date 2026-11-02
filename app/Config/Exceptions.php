@@ -107,6 +107,10 @@ class Exceptions extends BaseConfig
      */
     public function handler(int $statusCode, Throwable $exception): ExceptionHandlerInterface
     {
+        if (is_cli()) {
+            return new ExceptionHandler($this);
+        }
+
         return new \App\Libraries\JsonExceptionHandler($this);
     }
 }

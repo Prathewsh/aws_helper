@@ -26,7 +26,7 @@ class JsonExceptionHandler extends BaseExceptionHandler implements ExceptionHand
 
         $accept = $request->getHeaderLine('accept');
         $uriPath = trim($request->getUri()->getPath(), '/');
-        $isApiRoute = str_starts_with($uriPath, 'api');
+        $isApiRoute = $uriPath === 'api' || str_starts_with($uriPath, 'api/');
 
         // Render permission denied view for browser visits to non-API paths
         if (! $isApiRoute && str_contains($accept, 'text/html')) {

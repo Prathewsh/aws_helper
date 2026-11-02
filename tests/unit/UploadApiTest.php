@@ -175,6 +175,89 @@ final class UploadApiTest extends CIUnitTestCase
         $this->assertArrayHasKey('file', $body['messages']);
     }
 
+    public function testUploadValidatesPostBodyWithoutInvalidTrimRule(): void
+    {
+        $request = new IncomingRequest(new App(), new URI('http://example.com/api/upload'), null, new UserAgent());
+        $request->setGlobal('post', [
+            'bucket' => ' my-bucket ',
+            'region' => ' us-east-1 ',
+            'access_key' => 'example-key',
+            'secret_key' => 'example-secret',
+            'acl' => ' public-read ',
+        ]);
+        $request->setGlobal('server', ['CONTENT_LENGTH' => '256']);
+
+        $controller = new UploadController();
+        $controller->initController($request, new Response(new App()), Services::logger());
+        $response = $controller->upload();
+
+        $this->assertSame(422, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame('Validation failed', $body['error']);
+        $this->assertSame(['file'], array_keys($body['messages']));
+    }
+
+    public function testUploadRejectsBodyExceedingPhpLimit(): void
+    {
+        if ((int) ini_get('post_max_size') <= 0) {
+            $this->markTestSkipped('PHP post_max_size is unlimited.');
+        }
+
+        $request = new IncomingRequest(new App(), new URI('http://example.com/api/upload'), null, new UserAgent());
+        $request->setGlobal('server', ['CONTENT_LENGTH' => (string) PHP_INT_MAX]);
+        $controller = new UploadController();
+        $controller->initController($request, new Response(new App()), Services::logger());
+
+        $response = $controller->upload();
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame(
+            'Payload exceeds the server post_max_size limit.',
+            json_decode($response->getBody(), true)['error']
+        );
+    }
+
+    public function testUploadRejectsQueryParametersAsCredentials(): void
+    {
+        $request = new IncomingRequest(new App(), new URI('http://example.com/api/upload'), null, new UserAgent());
+        $request->setGlobal('post', []);
+        $request->setGlobal('get', [
+            'bucket' => 'my-bucket', 'region' => 'us-east-1',
+            'access_key' => 'example-key', 'secret_key' => 'example-secret',
+        ]);
+        $controller = new UploadController();
+        $controller->initController($request, new Response(new App()), Services::logger());
+
+        $response = $controller->upload();
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(422, $response->getStatusCode());
+        foreach (['bucket', 'region', 'access_key', 'secret_key'] as $field) {
+            $this->assertArrayHasKey($field, $body['messages']);
+        }
+    }
+
+    public function testUploadRejectsArrayFieldsAndFiles(): void
+    {
+        $request = $this->getMockBuilder(IncomingRequest::class)
+            ->setConstructorArgs([new App(), new URI('http://example.com/api/upload'), null, new UserAgent()])
+            ->onlyMethods(['getFiles'])
+            ->getMock();
+        $request->method('getFiles')->willReturn(['file' => []]);
+        $request->setGlobal('post', [
+            'bucket' => ['my-bucket'], 'region' => ['us-east-1'],
+            'access_key' => ['example-key'], 'secret_key' => ['example-secret'],
+            'path' => [], 'acl' => [],
+        ]);
+        $controller = new UploadController();
+        $controller->initController($request, new Response(new App()), Services::logger());
+
+        $response = $controller->upload();
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(422, $response->getStatusCode());
+        foreach (['bucket', 'region', 'access_key', 'secret_key', 'path', 'acl', 'file'] as $field) {
+            $this->assertArrayHasKey($field, $body['messages']);
+        }
+    }
+
     public function testJsonExceptionHandlerFormat(): void
     {
         $handler = new \App\Libraries\JsonExceptionHandler(config('Exceptions'));
@@ -194,6 +277,48 @@ final class UploadApiTest extends CIUnitTestCase
         $this->assertSame(500, $body['status']);
         $this->assertSame('Database connection lost', $body['error']);
         $this->assertSame('RuntimeException', $body['exception']);
+    }
+
+    public function testNonApiPrefixUsesBrowserErrorPage(): void
+    {
+        $handler = new \App\Libraries\JsonExceptionHandler(config('Exceptions'));
+        $request = new IncomingRequest(new App(), new URI('http://example.com/apiary'), null, new UserAgent());
+        $request->setHeader('Accept', 'text/html');
+        $response = new Response(new App());
+
+        ob_start();
+        try {
+            $handler->handle(new \RuntimeException('Failure'), $request, $response, 500, 1);
+        } finally {
+            ob_end_clean();
+        }
+
+        $this->assertStringContainsString('text/html', $response->getHeaderLine('Content-Type'));
+        $this->assertStringContainsString('Permission denied', $response->getBody());
+    }
+
+    public function testApiErrorsRemainJsonForBrowserRequests(): void
+    {
+        $handler = new \App\Libraries\JsonExceptionHandler(config('Exceptions'));
+        $request = new IncomingRequest(new App(), new URI('http://example.com/api/upload'), null, new UserAgent());
+        $request->setHeader('Accept', 'text/html');
+        $response = new Response(new App());
+
+        ob_start();
+        try {
+            $handler->handle(new \RuntimeException('Failure'), $request, $response, 500, 1);
+        } finally {
+            ob_end_clean();
+        }
+
+        $this->assertStringContainsString('application/json', $response->getHeaderLine('Content-Type'));
+        $this->assertSame(500, json_decode($response->getBody(), true)['status']);
+    }
+
+    public function testCliUsesFrameworkExceptionHandler(): void
+    {
+        $handler = config('Exceptions')->handler(500, new \RuntimeException('Failure'));
+        $this->assertInstanceOf(\CodeIgniter\Debug\ExceptionHandler::class, $handler);
     }
 
     public function testBasePathShowsPermissionDeniedPage(): void
