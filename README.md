@@ -1,6 +1,6 @@
 # Generic S3 Upload API (CodeIgniter 4)
 
-A generic, secure S3 upload API service built on CodeIgniter 4 (PHP 8.1+) and the official AWS SDK for PHP (`aws/aws-sdk-php`). Multiple client projects can upload media and assets by supplying their own AWS credentials, bucket details, and target paths per request.
+A generic, secure S3 upload API service built on CodeIgniter 4 (PHP 8.2+) and the official AWS SDK for PHP (`aws/aws-sdk-php`). Multiple client projects can upload media and assets by supplying their own AWS credentials, bucket details, and target paths per request.
 
 ---
 
@@ -20,7 +20,7 @@ A generic, secure S3 upload API service built on CodeIgniter 4 (PHP 8.1+) and th
 
 ## Requirements
 
-- PHP 8.1 or higher
+- PHP 8.2 or higher
 - PHP Extensions: `curl`, `intl`, `mbstring`, `fileinfo`, `json`, `simplexml`
 - Composer 2.x
 

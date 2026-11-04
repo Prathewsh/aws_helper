@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   ci:
-    name: Test & CI (PHP 8.1)
+    name: Test & CI (PHP 8.5)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -21,7 +21,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.1'
+          php-version: '8.5'
           extensions: intl, mbstring, curl, fileinfo, simplexml, json
           coverage: none
 

@@ -23,6 +23,7 @@ final class UploadApiTest extends CIUnitTestCase
     {
         parent::setUp();
         Services::reset(true);
+        unset($_SERVER['CONTENT_LENGTH']);
     }
 
     public function testApiTokenFilterMissingHeader(): void
